@@ -63,9 +63,14 @@ class VideoGenerator:
                         attention_folder = os.path.join(
                             self.args.output_path, "attention"
                         )
+                        mask_folder=os.path.join(
+                            self.args.output_path, "mask"
+                        )
 
                         os.makedirs(frames_folder, exist_ok=True)
                         os.makedirs(attention_folder, exist_ok=True)
+                        os.makedirs(mask_folder, exist_ok=True)
+
 
                         self._extract_frames_from_video(
                             self.args.input_path, frames_folder
@@ -74,10 +79,11 @@ class VideoGenerator:
                         self._inference(
                             frames_folder,
                             attention_folder,
+                            mask_folder
                         )
 
                         self._generate_video_from_images(
-                            attention_folder, self.args.output_path
+                            attention_folder,mask_folder, self.args.output_path
                         )
 
                     # If input is a folder of already extracted frames
@@ -116,44 +122,52 @@ class VideoGenerator:
             success, image = vidcap.read()
             count += 1
 
-    def _generate_video_from_images(self, inp: str, out: str):
-        img_array = []
-        attention_images_list = sorted(glob.glob(os.path.join(inp, "attn-*.jpg")))
+    def _generate_video_from_images(self, inp: str, inp_mask:str, out: str,):
+        prefixes=['attn-','mask-']
+        video_types=['attention_video','mask_video']
 
-        # Get size of the first image
-        with open(attention_images_list[0], "rb") as f:
-            img = Image.open(f)
-            img = img.convert("RGB")
-            size = (img.width, img.height)
-            img_array.append(cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR))
+        for i,folder in enumerate([inp,inp_mask]):
+            img_array = []
+            attention_images_list = sorted(glob.glob(os.path.join(folder, f"{prefixes[i]}*.jpg")))
 
-        print(f"Generating video {size} to {out}")
-
-        for filename in tqdm(attention_images_list[1:]):
-            with open(filename, "rb") as f:
+            # Get size of the first image
+            with open(attention_images_list[0], "rb") as f:
                 img = Image.open(f)
                 img = img.convert("RGB")
+                size = (img.width, img.height)
                 img_array.append(cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR))
 
-        out = cv2.VideoWriter(
-            os.path.join(out, "video." + self.args.video_format),
-            FOURCC[self.args.video_format],
-            self.args.fps,
-            size,
-        )
+            print(f"Generating video {size} to {out}")
 
-        for i in range(len(img_array)):
-            out.write(img_array[i])
-        out.release()
+            for filename in tqdm(attention_images_list[1:]):
+                with open(filename, "rb") as f:
+                    img = Image.open(f)
+                    img = img.convert("RGB")
+                    img_array.append(cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR))
+
+            out = cv2.VideoWriter(
+                os.path.join(out, f"{video_types[i]}." + self.args.video_format),
+                FOURCC[self.args.video_format],
+                self.args.fps,
+                size,
+            )
+
+            for i in range(len(img_array)):
+                out.write(img_array[i])
+            out.release()
         print("Done")
 
-    def _inference(self, inp: str, out: str):
+    def _inference(self,
+                   inp: str,
+                   out: str,
+                   out_mask:str):
         print(f"Generating attention images to {out}")
 
         for img_path in tqdm(sorted(glob.glob(os.path.join(inp, "*.jpg")))):
             with open(img_path, "rb") as f:
                 img = Image.open(f)
                 img = img.convert("RGB")
+                original_image=img.copy()
 
             if self.args.resize is not None:
                 transform = pth_transforms.Compose(
@@ -227,15 +241,35 @@ class VideoGenerator:
 
             # save attentions heatmaps
             fname = os.path.join(out, "attn-" + os.path.basename(img_path))
-            plt.imsave(
-                fname=fname,
-                arr=sum(
+            mask=sum(
                     attentions[i] * 1 / attentions.shape[0]
                     for i in range(attentions.shape[0])
-                ),
-                cmap="inferno",
+                )
+            plt.imsave(
+                fname=fname,
+                arr=mask,
+                cmap="GnBu",
                 format="jpg",
             )
+
+            ### create mask with  attentions
+            composite=self.mask_image(original_image,mask)
+            mask_fname = os.path.join(out_mask, "mask-" + os.path.basename(img_path))
+
+            composite.save(mask_fname)
+
+    @staticmethod
+    def mask_image(original_image,mask):
+
+        image1=original_image
+        image2=Image.new('RGB', image1.size, (255, 255, 255))
+        #mask_image=Image.fromarray(mask > 0.001)
+        mask_image=Image.fromarray((mask/np.max(mask))*255).convert('L')
+
+        composite = Image.composite(image1, image2, mask_image)
+        return composite
+
+
 
     def __load_model(self):
         # build model
