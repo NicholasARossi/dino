@@ -25,6 +25,7 @@ import torchvision
 from torchvision import transforms as pth_transforms
 import numpy as np
 from PIL import Image
+import matplotlib.colors as clrz
 
 import utils
 import vision_transformer as vits
@@ -52,7 +53,7 @@ class VideoGenerator:
         else:
             if self.args.video_only:
                 self._generate_video_from_images(
-                    self.args.input_path, self.args.output_path
+                   'output/attention','output/mask', 'output/'
                 )
             else:
                 # If input path exists
@@ -122,7 +123,7 @@ class VideoGenerator:
             success, image = vidcap.read()
             count += 1
 
-    def _generate_video_from_images(self, inp: str, inp_mask:str, out: str,):
+    def _generate_video_from_images(self, inp: str, inp_mask:str, folder: str,):
         prefixes=['attn-','mask-']
         video_types=['attention_video','mask_video']
 
@@ -137,7 +138,7 @@ class VideoGenerator:
                 size = (img.width, img.height)
                 img_array.append(cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR))
 
-            print(f"Generating video {size} to {out}")
+            print(f"Generating video {size} to {folder}")
 
             for filename in tqdm(attention_images_list[1:]):
                 with open(filename, "rb") as f:
@@ -146,7 +147,7 @@ class VideoGenerator:
                     img_array.append(cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR))
 
             out = cv2.VideoWriter(
-                os.path.join(out, f"{video_types[i]}." + self.args.video_format),
+                os.path.join(folder, f"{video_types[i]}." + self.args.video_format),
                 FOURCC[self.args.video_format],
                 self.args.fps,
                 size,
@@ -245,10 +246,12 @@ class VideoGenerator:
                     attentions[i] * 1 / attentions.shape[0]
                     for i in range(attentions.shape[0])
                 )
+            cmap = clrz.LinearSegmentedColormap.from_list("", ["black", "green"])
+
             plt.imsave(
                 fname=fname,
                 arr=mask,
-                cmap="GnBu",
+                cmap=cmap,
                 format="jpg",
             )
 
